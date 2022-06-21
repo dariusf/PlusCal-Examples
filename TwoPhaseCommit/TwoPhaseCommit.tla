@@ -1,180 +1,187 @@
 --------------------- MODULE TwoPhaseCommit ----------------------
-EXTENDS Naturals, TLC
-(*
---algorithm TwoPhaseCommit {
+EXTENDS Naturals, TLC, Sequences
+
+CONSTANTS p1, p2, coord
+
+RECURSIVE FoldLeft(_, _, _)
+FoldLeft(Op(_, _), S, value) ==
+  IF S = <<>> THEN value
+  ELSE LET s == Head(S) IN FoldLeft(Op, Tail(S), Op(s, value)) 
+
+Pick(S) == CHOOSE s \in S : TRUE
+
+RECURSIVE SetReduce(_, _, _)
+SetReduce(Op(_, _), S, value) ==
+  IF S = {} THEN value
+  ELSE LET s == Pick(S)
+  IN SetReduce(Op, S \ {s}, Op(s, value)) 
+
+Broadcast(state, msg, recipients) ==
+    LET op(c, t) == [t EXCEPT ![c] = msg] IN
+    SetReduce(op, recipients, state)
+
+(* --algorithm TwoPhaseCommit {
   variables 
-    managers = {"bob", "chuck", "dave", "everett", "fred"};
-    restaurant_stage = [mgr \in managers |-> "start"];
-    
-  macro SetAll(state, kmgrs) {
-    while (kmgrs # {}) {
-        with (km \in kmgrs) {
-           restaurant_stage[km] := state;
-           kmgrs := kmgrs \ {km};
-       };
-    };
-  }
-    
-  process (Restaurant \in managers)
+    participants = {p1, p2};
+    state = [p \in participants |-> "start"];
+
+  process (P \in participants)
   {
-    c0: await restaurant_stage[self] = "propose";
+    pPh1:
+      await state[self] = "propose";
     
-        either {
-          restaurant_stage[self] := "accept";
-        } or {
-          restaurant_stage[self] := "refuse";    
-        };
+      either {
+        state[self] := "accept";
+      } or {
+        state[self] := "refuse";    
+      };
     
-    c1: await (restaurant_stage[self] = "commit") \/
-              (restaurant_stage[self] = "abort");
+    pPh2:
+      await (state[self] = "commit") \/ (state[self] = "abort");
     
-        if (restaurant_stage[self] = "commit") {
-          restaurant_stage[self] := "committed";
-        } else {
-          restaurant_stage[self] := "aborted";          
-        };        
-  }; \* end Restaurant process block
+      if (state[self] = "commit") {
+        state[self] := "committed";
+      } else {
+        state[self] := "aborted";          
+      };
+  };
 
-  process (Controller = "alice")
-    variables rstMgrs, aborted = FALSE;    
+  process (Coordinator = "c1")
+    variables parts = <<>>, aborted = FALSE;    
   {  
-    n0: rstMgrs := managers;
-    n1: SetAll("propose", rstMgrs);
-        rstMgrs := managers;  \* reassign, since SetAll modified the original rstMgrs set
-        
-    n3: while (rstMgrs # {}) {
-          with (r \in rstMgrs) {
-            await (restaurant_stage[r] = "accept") \/ (restaurant_stage[r] = "refuse");
-            if ((restaurant_stage[r] = "refuse") (*/\ (r # "bob")*)) {
-              aborted := TRUE;
-            };
-            rstMgrs := rstMgrs \ {r};
+    n0:
+      parts := participants;
+
+    n1:
+      state := Broadcast(state, "propose", parts);
+
+    n3:
+      while (parts /= {}) {
+        with (r \in parts) {
+          await (state[r] = "accept") \/ (state[r] = "refuse");
+          if ((state[r] = "refuse")) {
+            aborted := TRUE;
           };
+          parts := parts \ {r};
         };
+      };
         
-        rstMgrs := managers;
-        if (aborted = TRUE) {
-    n4:   SetAll("abort", rstMgrs);
-        } else {
-          \* MP addition
-   nck:   assert \A rstMgr \in rstMgrs : (restaurant_stage[rstMgr] = "accept");
-          \* END MP addition        
-    n5:    SetAll("commit", rstMgrs);
-        };
-  } \* end Controller process block
+      parts := participants;
+      if (aborted) {
+        n4:
+          state := Broadcast(state, "abort", parts);
+      } else {
+        nck:
+          assert \A p \in parts : (state[p] = "accept");
+        n5:
+          state := Broadcast(state, "commit", parts);
+      };
+  }
 
-} \* end algorithm
+}
 *)    
-\* BEGIN TRANSLATION
-CONSTANT defaultInitValue
-VARIABLES managers, restaurant_stage, pc, rstMgrs, aborted
+\* BEGIN TRANSLATION (chksum(pcal) = "e9d12e6d" /\ chksum(tla) = "4f276897")
+VARIABLES participants, state, pc, parts, aborted
 
-vars == << managers, restaurant_stage, pc, rstMgrs, aborted >>
+vars == << participants, state, pc, parts, aborted >>
 
-ProcSet == (managers) \cup {"alice"}
+ProcSet == (participants) \cup {"c1"}
 
 Init == (* Global variables *)
-        /\ managers = {"bob", "chuck", "dave", "everett", "fred"}
-        /\ restaurant_stage = [mgr \in managers |-> "start"]
-        (* Process Controller *)
-        /\ rstMgrs = defaultInitValue
+        /\ participants = {p1, p2}
+        /\ state = [p \in participants |-> "start"]
+        (* Process Coordinator *)
+        /\ parts = <<>>
         /\ aborted = FALSE
-        /\ pc = [self \in ProcSet |-> CASE self \in managers -> "c0"
-                                        [] self = "alice" -> "n0"]
+        /\ pc = [self \in ProcSet |-> CASE self \in participants -> "pPh1"
+                                        [] self = "c1" -> "n0"]
 
-c0(self) == /\ pc[self] = "c0"
-            /\ restaurant_stage[self] = "propose"
-            /\ \/ /\ restaurant_stage' = [restaurant_stage EXCEPT ![self] = "accept"]
-               \/ /\ restaurant_stage' = [restaurant_stage EXCEPT ![self] = "refuse"]
-            /\ pc' = [pc EXCEPT ![self] = "c1"]
-            /\ UNCHANGED << managers, rstMgrs, aborted >>
+pPh1(self) == /\ pc[self] = "pPh1"
+              /\ state[self] = "propose"
+              /\ \/ /\ state' = [state EXCEPT ![self] = "accept"]
+                 \/ /\ state' = [state EXCEPT ![self] = "refuse"]
+              /\ pc' = [pc EXCEPT ![self] = "pPh2"]
+              /\ UNCHANGED << participants, parts, aborted >>
 
-c1(self) == /\ pc[self] = "c1"
-            /\ (restaurant_stage[self] = "commit") \/
-               (restaurant_stage[self] = "abort")
-            /\ IF restaurant_stage[self] = "commit"
-                  THEN /\ restaurant_stage' = [restaurant_stage EXCEPT ![self] = "committed"]
-                  ELSE /\ restaurant_stage' = [restaurant_stage EXCEPT ![self] = "aborted"]
-            /\ pc' = [pc EXCEPT ![self] = "Done"]
-            /\ UNCHANGED << managers, rstMgrs, aborted >>
+pPh2(self) == /\ pc[self] = "pPh2"
+              /\ (state[self] = "commit") \/ (state[self] = "abort")
+              /\ IF state[self] = "commit"
+                    THEN /\ state' = [state EXCEPT ![self] = "committed"]
+                    ELSE /\ state' = [state EXCEPT ![self] = "aborted"]
+              /\ pc' = [pc EXCEPT ![self] = "Done"]
+              /\ UNCHANGED << participants, parts, aborted >>
 
-Restaurant(self) == c0(self) \/ c1(self)
+P(self) == pPh1(self) \/ pPh2(self)
 
-n0 == /\ pc["alice"] = "n0"
-      /\ rstMgrs' = managers
-      /\ pc' = [pc EXCEPT !["alice"] = "n1"]
-      /\ UNCHANGED << managers, restaurant_stage, aborted >>
+n0 == /\ pc["c1"] = "n0"
+      /\ parts' = participants
+      /\ pc' = [pc EXCEPT !["c1"] = "n1"]
+      /\ UNCHANGED << participants, state, aborted >>
 
-n1 == /\ pc["alice"] = "n1"
-      /\ IF rstMgrs # {}
-            THEN /\ \E km \in rstMgrs:
-                      /\ restaurant_stage' = [restaurant_stage EXCEPT ![km] = "propose"]
-                      /\ rstMgrs' = rstMgrs \ {km}
-                 /\ pc' = [pc EXCEPT !["alice"] = "n1"]
-            ELSE /\ rstMgrs' = managers
-                 /\ pc' = [pc EXCEPT !["alice"] = "n3"]
-                 /\ UNCHANGED restaurant_stage
-      /\ UNCHANGED << managers, aborted >>
+n1 == /\ pc["c1"] = "n1"
+      /\ state' = Broadcast(state, "propose", parts)
+      /\ pc' = [pc EXCEPT !["c1"] = "n3"]
+      /\ UNCHANGED << participants, parts, aborted >>
 
-n3 == /\ pc["alice"] = "n3"
-      /\ IF rstMgrs # {}
-            THEN /\ \E r \in rstMgrs:
-                      /\ (restaurant_stage[r] = "accept") \/ (restaurant_stage[r] = "refuse")
-                      /\ IF (restaurant_stage[r] = "refuse")
+n3 == /\ pc["c1"] = "n3"
+      /\ IF parts /= {}
+            THEN /\ \E r \in parts:
+                      /\ (state[r] = "accept") \/ (state[r] = "refuse")
+                      /\ IF (state[r] = "refuse")
                             THEN /\ aborted' = TRUE
                             ELSE /\ TRUE
                                  /\ UNCHANGED aborted
-                      /\ rstMgrs' = rstMgrs \ {r}
-                 /\ pc' = [pc EXCEPT !["alice"] = "n3"]
-            ELSE /\ rstMgrs' = managers
-                 /\ IF aborted = TRUE
-                       THEN /\ pc' = [pc EXCEPT !["alice"] = "n4"]
-                       ELSE /\ pc' = [pc EXCEPT !["alice"] = "nck"]
+                      /\ parts' = parts \ {r}
+                 /\ pc' = [pc EXCEPT !["c1"] = "n3"]
+            ELSE /\ parts' = participants
+                 /\ IF aborted
+                       THEN /\ pc' = [pc EXCEPT !["c1"] = "n4"]
+                       ELSE /\ pc' = [pc EXCEPT !["c1"] = "nck"]
                  /\ UNCHANGED aborted
-      /\ UNCHANGED << managers, restaurant_stage >>
+      /\ UNCHANGED << participants, state >>
 
-n4 == /\ pc["alice"] = "n4"
-      /\ IF rstMgrs # {}
-            THEN /\ \E km \in rstMgrs:
-                      /\ restaurant_stage' = [restaurant_stage EXCEPT ![km] = "abort"]
-                      /\ rstMgrs' = rstMgrs \ {km}
-                 /\ pc' = [pc EXCEPT !["alice"] = "n4"]
-            ELSE /\ pc' = [pc EXCEPT !["alice"] = "Done"]
-                 /\ UNCHANGED << restaurant_stage, rstMgrs >>
-      /\ UNCHANGED << managers, aborted >>
+n4 == /\ pc["c1"] = "n4"
+      /\ state' = Broadcast(state, "abort", parts)
+      /\ pc' = [pc EXCEPT !["c1"] = "Done"]
+      /\ UNCHANGED << participants, parts, aborted >>
 
-nck == /\ pc["alice"] = "nck"
-       /\ Assert(\A rstMgr \in rstMgrs : (restaurant_stage[rstMgr] = "accept"), 
-                 "Failure of assertion at line 60, column 11.")
-       /\ pc' = [pc EXCEPT !["alice"] = "n5"]
-       /\ UNCHANGED << managers, restaurant_stage, rstMgrs, aborted >>
+nck == /\ pc["c1"] = "nck"
+       /\ Assert(\A p \in parts : (state[p] = "accept"), 
+                 "Failure of assertion at line 75, column 11.")
+       /\ pc' = [pc EXCEPT !["c1"] = "n5"]
+       /\ UNCHANGED << participants, state, parts, aborted >>
 
-n5 == /\ pc["alice"] = "n5"
-      /\ IF rstMgrs # {}
-            THEN /\ \E km \in rstMgrs:
-                      /\ restaurant_stage' = [restaurant_stage EXCEPT ![km] = "commit"]
-                      /\ rstMgrs' = rstMgrs \ {km}
-                 /\ pc' = [pc EXCEPT !["alice"] = "n5"]
-            ELSE /\ pc' = [pc EXCEPT !["alice"] = "Done"]
-                 /\ UNCHANGED << restaurant_stage, rstMgrs >>
-      /\ UNCHANGED << managers, aborted >>
+n5 == /\ pc["c1"] = "n5"
+      /\ state' = Broadcast(state, "commit", parts)
+      /\ pc' = [pc EXCEPT !["c1"] = "Done"]
+      /\ UNCHANGED << participants, parts, aborted >>
 
-Controller == n0 \/ n1 \/ n3 \/ n4 \/ nck \/ n5
+Coordinator == n0 \/ n1 \/ n3 \/ n4 \/ nck \/ n5
 
-Next == Controller
-           \/ (\E self \in managers: Restaurant(self))
-           \/ (* Disjunct to prevent deadlock on termination *)
-              ((\A self \in ProcSet: pc[self] = "Done") /\ UNCHANGED vars)
+(* Allow infinite stuttering to prevent deadlock on termination. *)
+Terminating == /\ \A self \in ProcSet: pc[self] = "Done"
+               /\ UNCHANGED vars
+
+Next == Coordinator
+           \/ (\E self \in participants: P(self))
+           \/ Terminating
 
 Spec == Init /\ [][Next]_vars
 
 Termination == <>(\A self \in ProcSet: pc[self] = "Done")
 
-\* END TRANSLATION
+\* END TRANSLATION 
 
-StateOK == /\ (\A i \in managers: restaurant_stage[i] \in {"start", "propose", "accept", "commit", "abort", "committed", "aborted", "refuse"})
+StateOK == /\ (\A p \in participants: state[p] \in {"start", "propose", "accept", "commit", "abort", "committed", "aborted", "refuse"})
 
-Committed == /\ \/ <>(\A i \in managers: restaurant_stage[i] = "committed")
-                \/ <>(\A i \in managers: restaurant_stage[i] = "aborted")
+\* everyone eventually commits or aborts.
+\* this is a temporal property which cannot be checked with stuttering it seems.
+Committed == /\ \/ <>(\A p \in participants: state[p] = "committed")
+                \/ <>(\A p \in participants: state[p] = "aborted")
+
+Inv ==
+  (\A p \in participants: state[p] \in {"committed", "aborted"}) =>
+    \/ \A p \in participants: state[p] = "committed"
+    \/ \A p \in participants: state[p] = "aborted"
 
 ==================================================================
