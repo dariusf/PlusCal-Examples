@@ -69,7 +69,7 @@ SendMessages(messages, msg, recipients) ==
       };
   };
 
-  process (Coordinator = "c1")
+  process (Coordinator = coord)
     variables parts = <<>>, aborted = FALSE;
   {
     n0:
@@ -111,12 +111,12 @@ SendMessages(messages, msg, recipients) ==
 
 }
 *)
-\* BEGIN TRANSLATION (chksum(pcal) = "660f34c9" /\ chksum(tla) = "73cfb4a7")
+\* BEGIN TRANSLATION (chksum(pcal) = "73aca750" /\ chksum(tla) = "a6f8f798")
 VARIABLES participants, state, messages, pc, parts, aborted
 
 vars == << participants, state, messages, pc, parts, aborted >>
 
-ProcSet == (participants) \cup {"c1"}
+ProcSet == (participants) \cup {coord}
 
 Init == (* Global variables *)
         /\ participants = {p1, p2}
@@ -126,7 +126,7 @@ Init == (* Global variables *)
         /\ parts = <<>>
         /\ aborted = FALSE
         /\ pc = [self \in ProcSet |-> CASE self \in participants -> "pPh1"
-                                        [] self = "c1" -> "n0"]
+                                        [] self = coord -> "n0"]
 
 pPh1(self) == /\ pc[self] = "pPh1"
               /\ state[self] = "propose"
@@ -152,18 +152,18 @@ pPh2(self) == /\ pc[self] = "pPh2"
 
 P(self) == pPh1(self) \/ pPh2(self)
 
-n0 == /\ pc["c1"] = "n0"
+n0 == /\ pc[coord] = "n0"
       /\ parts' = participants
-      /\ pc' = [pc EXCEPT !["c1"] = "n1"]
+      /\ pc' = [pc EXCEPT ![coord] = "n1"]
       /\ UNCHANGED << participants, state, messages, aborted >>
 
-n1 == /\ pc["c1"] = "n1"
+n1 == /\ pc[coord] = "n1"
       /\ state' = Broadcast(state, "propose", parts)
       /\ messages' = SendMessages(messages, "prepare", parts)
-      /\ pc' = [pc EXCEPT !["c1"] = "n3"]
+      /\ pc' = [pc EXCEPT ![coord] = "n3"]
       /\ UNCHANGED << participants, parts, aborted >>
 
-n3 == /\ pc["c1"] = "n3"
+n3 == /\ pc[coord] = "n3"
       /\ IF parts /= {}
             THEN /\ \E r \in parts:
                       /\ \/ /\ [To |-> r, From |-> coord, Type |-> "prepared"] \in messages
@@ -174,30 +174,30 @@ n3 == /\ pc["c1"] = "n3"
                             ELSE /\ TRUE
                                  /\ UNCHANGED aborted
                       /\ parts' = parts \ {r}
-                 /\ pc' = [pc EXCEPT !["c1"] = "n3"]
+                 /\ pc' = [pc EXCEPT ![coord] = "n3"]
             ELSE /\ parts' = participants
                  /\ IF aborted
-                       THEN /\ pc' = [pc EXCEPT !["c1"] = "n4"]
-                       ELSE /\ pc' = [pc EXCEPT !["c1"] = "nck"]
+                       THEN /\ pc' = [pc EXCEPT ![coord] = "n4"]
+                       ELSE /\ pc' = [pc EXCEPT ![coord] = "nck"]
                  /\ UNCHANGED aborted
       /\ UNCHANGED << participants, state, messages >>
 
-n4 == /\ pc["c1"] = "n4"
+n4 == /\ pc[coord] = "n4"
       /\ state' = Broadcast(state, "abort", parts)
       /\ messages' = SendMessages(messages, "abort", parts)
-      /\ pc' = [pc EXCEPT !["c1"] = "Done"]
+      /\ pc' = [pc EXCEPT ![coord] = "Done"]
       /\ UNCHANGED << participants, parts, aborted >>
 
-nck == /\ pc["c1"] = "nck"
+nck == /\ pc[coord] = "nck"
        /\ Assert(\A p \in parts : (state[p] = "accept"), 
                  "Failure of assertion at line 105, column 11.")
-       /\ pc' = [pc EXCEPT !["c1"] = "n5"]
+       /\ pc' = [pc EXCEPT ![coord] = "n5"]
        /\ UNCHANGED << participants, state, messages, parts, aborted >>
 
-n5 == /\ pc["c1"] = "n5"
+n5 == /\ pc[coord] = "n5"
       /\ state' = Broadcast(state, "commit", parts)
       /\ messages' = SendMessages(messages, "commit", parts)
-      /\ pc' = [pc EXCEPT !["c1"] = "Done"]
+      /\ pc' = [pc EXCEPT ![coord] = "Done"]
       /\ UNCHANGED << participants, parts, aborted >>
 
 Coordinator == n0 \/ n1 \/ n3 \/ n4 \/ nck \/ n5
