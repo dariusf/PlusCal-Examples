@@ -1,30 +1,19 @@
---------------------- MODULE Concurrent2 ----------------------
+--------------------- MODULE Concurrent1 ----------------------
 EXTENDS Naturals, TLC, Sequences, FiniteSets
-
-CONSTANTS p1, p2, q1, q2, q3
 
 (* --algorithm Concurrent {
   variables 
-    ps = {p1, p2};
-    \* qs = {q1, q2, q3};
-    qs = {q1, q2};
+    ps = {"p1", "p2"};
+    \* qs = {"q1", "q2", q3};
+    qs = {"q1", "q2"};
     state = [p \in ps |-> "start"];
-    out = {};
-    n = 0;
+    \* out = {};
     \* done1 = FALSE;
 
 \* c.a = 1
 \* forall p in P
 \* forall c in C
 \* p->c: m(p, c); c.a = c.a union {p}
-
-  procedure a() {
-    if (n < 0) {
-      return;
-    } else {
-
-    }
-  }
 
   process (main = "proc")
     \* variables out={};
@@ -41,12 +30,14 @@ CONSTANTS p1, p2, q1, q2, q3
     \* variables out={};
   {
     \* out := {2}
-    \* pa:
+    pa:
     await \A q \in qs : pc[q] = "Done"
   }
 
   process (q \in qs)
     variables auxps = ps;
+    \* out = [self \in qs |-> {}];
+    out = {};
   {
     \* qb:
     \* with (x \in {1,2}) {
@@ -58,6 +49,7 @@ CONSTANTS p1, p2, q1, q2, q3
       \* pick some process that is waiting for us to finish.
       \* the others in ps are unconstrained.
       with (pp \in { pr \in ps : pc[pr] = "pa" }) {
+        \* out := out \union {<<pp, self>>};
         out := out \union {<<pp, self>>};
         auxps := auxps \ {pp};
       }
@@ -80,64 +72,55 @@ CONSTANTS p1, p2, q1, q2, q3
 
 }
 *)    
-\* BEGIN TRANSLATION (chksum(pcal) = "e6860f85" /\ chksum(tla) = "221ec37c")
-VARIABLES ps, qs, state, out, pc, stack, auxps
+\* BEGIN TRANSLATION (chksum(pcal) = "e27590e2" /\ chksum(tla) = "f39f916c")
+VARIABLES ps, qs, state, pc, auxps, out
 
-vars == << ps, qs, state, out, pc, stack, auxps >>
+vars == << ps, qs, state, pc, auxps, out >>
 
 ProcSet == {"proc"} \cup (ps) \cup (qs)
 
 Init == (* Global variables *)
-        /\ ps = {p1, p2}
-        /\ qs = {q1, q2}
+        /\ ps = {"p1", "p2"}
+        /\ qs = {"q1", "q2"}
         /\ state = [p \in ps |-> "start"]
-        /\ out = {}
         (* Process q *)
         /\ auxps = [self \in qs |-> ps]
-        /\ stack = [self \in ProcSet |-> << >>]
+        /\ out = [self \in qs |-> {}]
         /\ pc = [self \in ProcSet |-> CASE self = "proc" -> "Lbl_1"
-                                        [] self \in ps -> "Lbl_2"
-                                        [] self \in qs -> "Lbl_3"]
-
-Lbl_4(self) == /\ pc[self] = "Lbl_4"
-               /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
-               /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
-               /\ UNCHANGED << ps, qs, state, out, auxps >>
-
-a(self) == Lbl_4(self)
+                                        [] self \in ps -> "pa"
+                                        [] self \in qs -> "Lbl_2"]
 
 Lbl_1 == /\ pc["proc"] = "Lbl_1"
          /\ \A p \in ps : pc[p] = "Done"
          /\ pc' = [pc EXCEPT !["proc"] = "Done"]
-         /\ UNCHANGED << ps, qs, state, out, stack, auxps >>
+         /\ UNCHANGED << ps, qs, state, auxps, out >>
 
 main == Lbl_1
 
+pa(self) == /\ pc[self] = "pa"
+            /\ \A q \in qs : pc[q] = "Done"
+            /\ pc' = [pc EXCEPT ![self] = "Done"]
+            /\ UNCHANGED << ps, qs, state, auxps, out >>
+
+p(self) == pa(self)
+
 Lbl_2(self) == /\ pc[self] = "Lbl_2"
-               /\ \A q \in qs : pc[q] = "Done"
-               /\ pc' = [pc EXCEPT ![self] = "Done"]
-               /\ UNCHANGED << ps, qs, state, out, stack, auxps >>
-
-p(self) == Lbl_2(self)
-
-Lbl_3(self) == /\ pc[self] = "Lbl_3"
                /\ IF auxps[self] /= {}
                      THEN /\ \E pp \in { pr \in ps : pc[pr] = "pa" }:
-                               /\ out' = (out \union {<<pp, self>>})
+                               /\ out' = [out EXCEPT ![self] = out[self] \union {<<pp, self>>}]
                                /\ auxps' = [auxps EXCEPT ![self] = auxps[self] \ {pp}]
-                          /\ pc' = [pc EXCEPT ![self] = "Lbl_3"]
+                          /\ pc' = [pc EXCEPT ![self] = "Lbl_2"]
                      ELSE /\ pc' = [pc EXCEPT ![self] = "Done"]
-                          /\ UNCHANGED << out, auxps >>
-               /\ UNCHANGED << ps, qs, state, stack >>
+                          /\ UNCHANGED << auxps, out >>
+               /\ UNCHANGED << ps, qs, state >>
 
-q(self) == Lbl_3(self)
+q(self) == Lbl_2(self)
 
 (* Allow infinite stuttering to prevent deadlock on termination. *)
 Terminating == /\ \A self \in ProcSet: pc[self] = "Done"
                /\ UNCHANGED vars
 
 Next == main
-           \/ (\E self \in ProcSet: a(self))
            \/ (\E self \in ps: p(self))
            \/ (\E self \in qs: q(self))
            \/ Terminating
@@ -148,10 +131,17 @@ Termination == <>(\A self \in ProcSet: pc[self] = "Done")
 
 \* END TRANSLATION 
 
-\* Target == ~ \A p \in participants : state[p] /= "start"
+\* Target == ~
+\*   \A px \in {"p1", "p2", "q1", "q2"} : state[px] /= "start"
 
 Target == ~
-  Cardinality(out) >= 4
+  /\ TLCGet("level") >= 10
+
+\* Target == ~
+\*   \A px \in {"p1", "p2", "q1", "q2"} : state[px] = "Done"
+
+\* Target == ~
+\*   Cardinality(out) >= 4
 
 \* Target == TRUE
 
